@@ -11,7 +11,7 @@ use swc_core::{
             ArrayLit, ArrowExpr, BlockStmt, BlockStmtOrExpr, Bool, CallExpr, Callee, Expr,
             ExprOrSpread, ExprStmt, Id, Ident, ImportDecl, ImportDefaultSpecifier,
             ImportNamedSpecifier, ImportSpecifier, KeyValueProp, Lit, Module, ModuleDecl,
-            ModuleItem, Null, ObjectLit, ParenExpr, Prop, PropName, PropOrSpread, Stmt, Str, Tpl,
+            ModuleItem, ObjectLit, ParenExpr, Prop, PropName, PropOrSpread, Stmt, Str, Tpl,
         },
         utils::{prepend_stmt, private_ident, quote_ident, ExprExt, ExprFactory},
         visit::{Fold, FoldWith},

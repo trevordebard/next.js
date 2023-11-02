@@ -70,7 +70,9 @@ createNextDescribe(
           'ssr-false-client-module-text'
         )
         // noSSR should not show up in browser
-        const browser = await next.browser('/dynamic-mixed-ssr-false/server')
+        const browser = await next.browser(
+          '/dynamic-mixed-ssr-false/client-edge'
+        )
         expect(
           await browser.elementByCss('#ssr-false-server-module').text()
         ).toBe('ssr-false-server-module-text')
