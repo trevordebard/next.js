@@ -1,5 +1,4 @@
 import { createNextDescribe } from 'e2e-utils'
-import fsp from 'fs/promises'
 
 createNextDescribe(
   'app dir - next/dynamic',
@@ -86,35 +85,7 @@ createNextDescribe(
             '.next/server/app/dynamic-mixed-ssr-false/client-edge/page.js'
           const edgeServerChunk = await next.readFile(chunkPath)
 
-          // const serverChunksFilePaths = await fsp.readdir(
-          //   `${next.testDir}/${chunksDir}`
-          // )
-
-          let hasServerModule = false
-          // const readFilePromises = serverChunksFilePaths.map(
-          //   async (filePath) => {
-          //     const pageServerChunk = await next.readFile(
-          //       `${chunkPath}/${filePath}`
-          //       // filePath
-          //     )
-          //     hasServerModule ||= pageServerChunk.includes(
-          //       'ssr-false-server-module-text'
-          //     )
-          //     expect(pageServerChunk).not.toContain(
-          //       'ssr-false-client-module-text'
-          //     )
-          //   }
-          // )
-          // await Promise.all(readFilePromises)
           expect(edgeServerChunk).not.toContain('ssr-false-client-module-text')
-
-          // const pageServerChunk = await next.readFile(
-          //   `${chunksDir}/${serverChunksFilePaths[0]}`
-          // )
-          // const pageServerChunk = await next.readFile(
-          //   '.next/server/app/dynamic-mixed-ssr-false/server/page.js'
-          // )
-          // expect(pageServerChunk).toContain('ssr-false-server-module-text')
         }
       })
 
@@ -146,15 +117,5 @@ createNextDescribe(
         }
       })
     })
-
-    // if (isNextStart) {
-    //   it('should not contain ssr:false module in edge server bundle', async () => {
-    //     const pageServerChunk = await next.readFile(
-    //       '.next/server/app/dynamic-edge/page.js'
-    //     )
-    //     expect(pageServerChunk).toContain('ssr-false-server-module-text')
-    //     expect(pageServerChunk).not.toContain('ssr-false-client-module-text')
-    //   })
-    // }
   }
 )

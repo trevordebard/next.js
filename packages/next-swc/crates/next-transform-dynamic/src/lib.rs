@@ -654,14 +654,12 @@ fn wrap_expr_with_client_only_cond(wrapped_expr: &Expr) -> Expr {
     });
 
     // Create the LogicalExpr 'typeof window !== "undefined" && x'
-    let logical_expr = Expr::Bin(BinExpr {
+    Expr::Bin(BinExpr {
         span: DUMMY_SP,
         op: op!("&&"), // '&&' operator
         left: Box::new(inequality_expr),
         right: Box::new(wrapped_expr.clone()),
-    });
-
-    logical_expr
+    })
 }
 
 fn rel_filename(base: Option<&Path>, file: &FileName) -> String {
