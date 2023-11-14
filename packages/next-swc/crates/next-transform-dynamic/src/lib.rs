@@ -8,10 +8,11 @@ use swc_core::{
     common::{errors::HANDLER, FileName, Span, DUMMY_SP},
     ecma::{
         ast::{
-            ArrayLit, ArrowExpr, BlockStmt, BlockStmtOrExpr, Bool, CallExpr, Callee, Expr,
-            ExprOrSpread, ExprStmt, Id, Ident, ImportDecl, ImportDefaultSpecifier,
+            op, ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmt, BlockStmtOrExpr, Bool, CallExpr,
+            Callee, Expr, ExprOrSpread, ExprStmt, Id, Ident, ImportDecl, ImportDefaultSpecifier,
             ImportNamedSpecifier, ImportSpecifier, KeyValueProp, Lit, Module, ModuleDecl,
             ModuleItem, ObjectLit, ParenExpr, Prop, PropName, PropOrSpread, Stmt, Str, Tpl,
+            UnaryExpr, UnaryOp,
         },
         utils::{prepend_stmt, private_ident, quote_ident, ExprExt, ExprFactory},
         visit::{Fold, FoldWith},
@@ -419,7 +420,9 @@ impl Fold for NextDynamicPatcher {
                                 stmts: vec![
                                     Stmt::Expr(ExprStmt {
                                         span: DUMMY_SP,
-                                        expr: Box::new(pure_fn_call),
+                                        expr: Box::new(wrap_expr_with_client_only_cond(
+                                            &pure_fn_call,
+                                        )),
                                     }),
                                     // pure_fn_call,
                                     // loader is still inside the module but not executed,
@@ -623,6 +626,42 @@ impl NextDynamicPatcher {
 
         std::mem::swap(&mut new_items, items)
     }
+}
+
+// Receive an expression and return `typeof window !== 'undefined' &&
+// <expression>`, to make the expression is tree-shakable on server side but
+// still remain in module graph.
+fn wrap_expr_with_client_only_cond(wrapped_expr: &Expr) -> Expr {
+    let typeof_expr = Expr::Unary(UnaryExpr {
+        span: DUMMY_SP,
+        op: UnaryOp::TypeOf, // 'typeof' operator
+        arg: Box::new(Expr::Ident(Ident {
+            span: DUMMY_SP,
+            sym: "window".into(),
+            optional: false,
+        })),
+    });
+    let undefined_literal = Expr::Lit(Lit::Str(Str {
+        span: DUMMY_SP,
+        value: "undefined".into(),
+        raw: None,
+    }));
+    let inequality_expr = Expr::Bin(BinExpr {
+        span: DUMMY_SP,
+        left: Box::new(typeof_expr),
+        op: BinaryOp::NotEqEq, // '!=='
+        right: Box::new(undefined_literal),
+    });
+
+    // Create the LogicalExpr 'typeof window !== "undefined" && x'
+    let logical_expr = Expr::Bin(BinExpr {
+        span: DUMMY_SP,
+        op: op!("&&"), // '&&' operator
+        left: Box::new(inequality_expr),
+        right: Box::new(wrapped_expr.clone()),
+    });
+
+    logical_expr
 }
 
 fn rel_filename(base: Option<&Path>, file: &FileName) -> String {
