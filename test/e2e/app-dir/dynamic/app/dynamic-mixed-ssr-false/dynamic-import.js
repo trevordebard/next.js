@@ -1,8 +1,18 @@
 import dynamic from 'next/dynamic'
 
-const DynamicSSRFalse = dynamic(() => import('./ssr-false-module'), {
-  ssr: false,
-})
+const DynamicSSRFalse = dynamic(
+  async () => {
+    if (typeof window === 'undefined') {
+      require.resolveWeak('./ssr-false-module')
+      return () => null
+    } else {
+      return import('./ssr-false-module')
+    }
+  },
+  {
+    ssr: false,
+  }
+)
 
 export default function page() {
   return (

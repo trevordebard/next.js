@@ -9,10 +9,10 @@ use swc_core::{
     ecma::{
         ast::{
             op, ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmt, BlockStmtOrExpr, Bool, CallExpr,
-            Callee, Expr, ExprOrSpread, ExprStmt, Id, Ident, ImportDecl, ImportDefaultSpecifier,
-            ImportNamedSpecifier, ImportSpecifier, KeyValueProp, Lit, MemberExpr, MemberProp,
-            Module, ModuleDecl, ModuleItem, ObjectLit, ParenExpr, Prop, PropName, PropOrSpread,
-            Stmt, Str, Tpl,
+            Callee, CondExpr, Expr, ExprOrSpread, ExprStmt, Id, Ident, ImportDecl,
+            ImportDefaultSpecifier, ImportNamedSpecifier, ImportSpecifier, KeyValueProp, Lit,
+            MemberExpr, MemberProp, Module, ModuleDecl, ModuleItem, ObjectLit, ParenExpr, Prop,
+            PropName, PropOrSpread, Stmt, Str, Tpl, UnaryExpr, UnaryOp,
         },
         utils::{prepend_stmt, private_ident, quote_ident, ExprExt, ExprFactory},
         visit::{Fold, FoldWith},
@@ -420,9 +420,7 @@ impl Fold for NextDynamicPatcher {
                                 stmts: vec![
                                     Stmt::Expr(ExprStmt {
                                         span: DUMMY_SP,
-                                        expr: Box::new(wrap_expr_with_client_only_cond(
-                                            &pure_fn_call,
-                                        )),
+                                        expr: Box::new(pure_fn_call),
                                     }),
                                     // pure_fn_call,
                                     // loader is still inside the module but not executed,
@@ -660,6 +658,22 @@ fn wrap_expr_with_client_only_cond(wrapped_expr: &Expr) -> Expr {
         }),
     });
 
+    let undefined_str_literal = Expr::Lit(Lit::Str(Str {
+        span: DUMMY_SP,
+        value: "edge".into(),
+        raw: None,
+    }));
+
+    let typeof_expr = Expr::Unary(UnaryExpr {
+        span: DUMMY_SP,
+        op: UnaryOp::TypeOf, // 'typeof' operator
+        arg: Box::new(Expr::Ident(Ident {
+            span: DUMMY_SP,
+            sym: "window".into(),
+            optional: false,
+        })),
+    });
+
     // Create process.env.NEXT_RUNTIME === 'browser'
     let browser_only_expr = Expr::Bin(BinExpr {
         span: DUMMY_SP,
@@ -669,11 +683,34 @@ fn wrap_expr_with_client_only_cond(wrapped_expr: &Expr) -> Expr {
     });
 
     // create expression <browser only condition> && <expression>
-    Expr::Bin(BinExpr {
+    // Expr::Bin(BinExpr {
+    //     span: DUMMY_SP,
+    //     op: op!("&&"),
+    //     left: Box::new(browser_only_expr),
+    //     right: Box::new(wrapped_expr.clone()),
+    // });
+
+    // transform import('...') which is named as `wrapped_expr` to
+    // typeof window !== 'undefined' ? import('...') : require.resolveWeak('...')
+
+    Expr::Cond(CondExpr {
         span: DUMMY_SP,
-        op: op!("&&"),
-        left: Box::new(browser_only_expr),
-        right: Box::new(wrapped_expr.clone()),
+        test: Box::new(Expr::Bin(BinExpr {
+            span: DUMMY_SP,
+            op: op!("!=="),
+            left: Box::new(typeof_expr),
+            right: Box::new(undefined_str_literal),
+        })),
+        cons: Box::new(wrapped_expr.clone()),
+        alt: Box::new(Expr::Call(CallExpr {
+            span: DUMMY_SP,
+            callee: quote_ident!("require.resolveWeak").as_callee(),
+            args: vec![ExprOrSpread {
+                spread: None,
+                expr: Box::new(wrapped_expr.clone()),
+            }],
+            type_args: Default::default(),
+        })),
     })
 }
 
