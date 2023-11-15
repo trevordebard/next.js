@@ -8,11 +8,11 @@ use swc_core::{
     common::{errors::HANDLER, FileName, Span, DUMMY_SP},
     ecma::{
         ast::{
-            op, ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmt, BlockStmtOrExpr, Bool, CallExpr,
-            Callee, CondExpr, Expr, ExprOrSpread, ExprStmt, Id, Ident, ImportDecl,
-            ImportDefaultSpecifier, ImportNamedSpecifier, ImportSpecifier, KeyValueProp, Lit,
-            MemberExpr, MemberProp, Module, ModuleDecl, ModuleItem, ObjectLit, ParenExpr, Prop,
-            PropName, PropOrSpread, Stmt, Str, Tpl, UnaryExpr, UnaryOp,
+            op, ArrayLit, ArrowExpr, BinExpr, BlockStmt, BlockStmtOrExpr, Bool, CallExpr, Callee,
+            CondExpr, Expr, ExprOrSpread, ExprStmt, Id, Ident, ImportDecl, ImportDefaultSpecifier,
+            ImportNamedSpecifier, ImportSpecifier, KeyValueProp, Lit, Module, ModuleDecl,
+            ModuleItem, ObjectLit, Prop, PropName, PropOrSpread, Stmt, Str, Tpl, UnaryExpr,
+            UnaryOp,
         },
         utils::{prepend_stmt, private_ident, quote_ident, ExprExt, ExprFactory},
         visit::{Fold, FoldWith},
@@ -174,6 +174,7 @@ impl Fold for NextDynamicPatcher {
                         self.dynamically_imported_specifier =
                             Some((quasis[0].raw.to_string(), quasis[0].span));
                     }
+
                     _ => {}
                 }
             }
@@ -251,12 +252,12 @@ impl Fold for NextDynamicPatcher {
                                             rel_filename(self.pages_dir.as_deref(), &self.filename)
                                         )
                                         .into(),
-                                        right: Expr = dynamically_imported_specifier.into(),
+                                        right: Expr = dynamically_imported_specifier.clone().into(),
                                     ))
                                 } else {
                                     webpack_options(quote!(
                                         "require.resolveWeak($id)" as Expr,
-                                        id: Expr = dynamically_imported_specifier.into()
+                                        id: Expr = dynamically_imported_specifier.clone().into()
                                     ))
                                 }
                             }
@@ -274,7 +275,7 @@ impl Fold for NextDynamicPatcher {
                                         imports.push(TurbopackImport::DevelopmentTransition {
                                             id_ident: id_ident.clone(),
                                             chunks_ident: chunks_ident.clone(),
-                                            specifier: dynamically_imported_specifier,
+                                            specifier: dynamically_imported_specifier.clone(),
                                         });
 
                                         // On the server, the key needs to be serialized because it
@@ -295,7 +296,7 @@ impl Fold for NextDynamicPatcher {
                                     (true, false) => {
                                         imports.push(TurbopackImport::DevelopmentId {
                                             id_ident: id_ident.clone(),
-                                            specifier: dynamically_imported_specifier,
+                                            specifier: dynamically_imported_specifier.clone(),
                                         });
 
                                         // On the client, we only need the target module ID, which
@@ -382,33 +383,43 @@ impl Fold for NextDynamicPatcher {
 
                     if has_ssr_false && self.is_server_compiler && !self.is_react_server_layer {
                         // if it's server components SSR layer
-                        // Transform 1st argument `expr.args[0]` aka the module loader to:
-                        // (() => {
-                        //    expr.args[0]
-                        // })`
-                        // For instance:
-                        // dynamic((() =>
-                        //   /**
-                        //    * this will make sure we can traverse the module first but will be
-                        //    * tree-shake out in server bundle */
-                        //   <browser only condition> && __nextjs_pure((() =>
-                        // import('./client-mod'))) ), { ssr: false })
+                        // Transform 1st argument `expr.args[0]` aka the module loader from:
+                        // dynamic(() => import('./client-mod'), { ssr: false }))`
+                        // into:
+                        // dynamic(async () => {
+                        //  typeof window !== 'undefined' ? import('./client-mod') :
+                        // require.resolveWeak('./client-mod')
+                        // }, { ssr: false }))`
 
                         self.added_nextjs_pure_import = true;
 
                         // create function call of `__nextjs_pure` wrapping the
                         // `side_effect_free_loader_arg.as_arg()`
-                        let pure_fn_call = Expr::Call(CallExpr {
+                        // let pure_fn_call = Expr::Call(CallExpr {
+                        //     span: DUMMY_SP,
+                        //     callee: quote_ident!("__nextjs_pure").as_callee(),
+                        //     args: vec![Expr::Paren(ParenExpr {
+                        //         span: DUMMY_SP,
+                        //         expr: Box::new(Expr::Paren(ParenExpr {
+                        //             span: DUMMY_SP,
+                        //             expr: Box::new(expr.args[0].expr.as_expr().clone()),
+                        //         })),
+                        //     })
+                        //     .into()],
+                        //     type_args: Default::default(),
+                        // });
+
+                        let require_resolve_weak_expr = Expr::Call(CallExpr {
                             span: DUMMY_SP,
-                            callee: quote_ident!("__nextjs_pure").as_callee(),
-                            args: vec![Expr::Paren(ParenExpr {
-                                span: DUMMY_SP,
-                                expr: Box::new(Expr::Paren(ParenExpr {
+                            callee: quote_ident!("require.resolveWeak").as_callee(),
+                            args: vec![ExprOrSpread {
+                                spread: None,
+                                expr: Box::new(Expr::Lit(Lit::Str(Str {
                                     span: DUMMY_SP,
-                                    expr: Box::new(expr.args[0].expr.as_expr().clone()),
-                                })),
-                            })
-                            .into()],
+                                    value: dynamically_imported_specifier.clone().into(),
+                                    raw: None,
+                                }))),
+                            }],
                             type_args: Default::default(),
                         });
 
@@ -420,7 +431,10 @@ impl Fold for NextDynamicPatcher {
                                 stmts: vec![
                                     Stmt::Expr(ExprStmt {
                                         span: DUMMY_SP,
-                                        expr: Box::new(pure_fn_call),
+                                        expr: Box::new(wrap_expr_with_client_only_cond(
+                                            &expr.args[0].expr.as_expr(),
+                                            &require_resolve_weak_expr,
+                                        )),
                                     }),
                                     // pure_fn_call,
                                     // loader is still inside the module but not executed,
@@ -626,41 +640,41 @@ impl NextDynamicPatcher {
     }
 }
 
-// Receive an expression and return `process.env.NEXT_RUNTIME === 'browser' &&
-// <expression>`, to make the expression is tree-shakable on server side but
+// Receive an expression and return `<is browser> && <expression>`,
+// to make the expression is tree-shakable on server side but
 // still remain in module graph.
-fn wrap_expr_with_client_only_cond(wrapped_expr: &Expr) -> Expr {
-    let browser_str_literal = Expr::Lit(Lit::Str(Str {
-        span: DUMMY_SP,
-        value: "browser".into(),
-        raw: None,
-    }));
+fn wrap_expr_with_client_only_cond(left: &Expr, right: &Expr) -> Expr {
+    // let browser_str_literal = Expr::Lit(Lit::Str(Str {
+    //     span: DUMMY_SP,
+    //     value: "browser".into(),
+    //     raw: None,
+    // }));
 
-    let process_next_runtime_expr = Expr::Member(MemberExpr {
-        span: DUMMY_SP,
-        obj: (Box::new(Expr::Member(MemberExpr {
-            span: DUMMY_SP,
-            obj: (Box::new(Expr::Ident(Ident {
-                span: DUMMY_SP,
-                sym: "process".into(),
-                optional: false,
-            }))),
-            prop: MemberProp::Ident(Ident {
-                span: DUMMY_SP,
-                sym: "env".into(),
-                optional: false,
-            }),
-        }))),
-        prop: MemberProp::Ident(Ident {
-            span: DUMMY_SP,
-            sym: "NEXT_RUNTIME".into(),
-            optional: false,
-        }),
-    });
+    // let process_next_runtime_expr = Expr::Member(MemberExpr {
+    //     span: DUMMY_SP,
+    //     obj: (Box::new(Expr::Member(MemberExpr {
+    //         span: DUMMY_SP,
+    //         obj: (Box::new(Expr::Ident(Ident {
+    //             span: DUMMY_SP,
+    //             sym: "process".into(),
+    //             optional: false,
+    //         }))),
+    //         prop: MemberProp::Ident(Ident {
+    //             span: DUMMY_SP,
+    //             sym: "env".into(),
+    //             optional: false,
+    //         }),
+    //     }))),
+    //     prop: MemberProp::Ident(Ident {
+    //         span: DUMMY_SP,
+    //         sym: "NEXT_RUNTIME".into(),
+    //         optional: false,
+    //     }),
+    // });
 
     let undefined_str_literal = Expr::Lit(Lit::Str(Str {
         span: DUMMY_SP,
-        value: "edge".into(),
+        value: "undefined".into(),
         raw: None,
     }));
 
@@ -675,12 +689,12 @@ fn wrap_expr_with_client_only_cond(wrapped_expr: &Expr) -> Expr {
     });
 
     // Create process.env.NEXT_RUNTIME === 'browser'
-    let browser_only_expr = Expr::Bin(BinExpr {
-        span: DUMMY_SP,
-        left: Box::new(process_next_runtime_expr),
-        op: BinaryOp::EqEqEq, // '==='
-        right: Box::new(browser_str_literal),
-    });
+    // let browser_only_expr = Expr::Bin(BinExpr {
+    //     span: DUMMY_SP,
+    //     left: Box::new(process_next_runtime_expr),
+    //     op: BinaryOp::EqEqEq, // '==='
+    //     right: Box::new(browser_str_literal),
+    // });
 
     // create expression <browser only condition> && <expression>
     // Expr::Bin(BinExpr {
@@ -701,16 +715,18 @@ fn wrap_expr_with_client_only_cond(wrapped_expr: &Expr) -> Expr {
             left: Box::new(typeof_expr),
             right: Box::new(undefined_str_literal),
         })),
-        cons: Box::new(wrapped_expr.clone()),
-        alt: Box::new(Expr::Call(CallExpr {
-            span: DUMMY_SP,
-            callee: quote_ident!("require.resolveWeak").as_callee(),
-            args: vec![ExprOrSpread {
-                spread: None,
-                expr: Box::new(wrapped_expr.clone()),
-            }],
-            type_args: Default::default(),
-        })),
+        cons: Box::new(left.clone()),
+        alt: Box::new(
+            right.clone(), /* Expr::Call(CallExpr {
+                            *     span: DUMMY_SP,
+                            *     callee: quote_ident!("require.resolveWeak").as_callee(),
+                            *     args: vec![ExprOrSpread {
+                            *         spread: None,
+                            *         expr: Box::new(left.clone()),
+                            *     }],
+                            *     type_args: Default::default(),
+                            * }) */
+        ),
     })
 }
 
