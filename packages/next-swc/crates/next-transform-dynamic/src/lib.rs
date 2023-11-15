@@ -387,27 +387,12 @@ impl Fold for NextDynamicPatcher {
                         // dynamic(() => import('./client-mod'), { ssr: false }))`
                         // into:
                         // dynamic(async () => {
-                        //  typeof window !== 'undefined' ? import('./client-mod') :
-                        // require.resolveWeak('./client-mod')
+                        //   typeof window !== 'undefined'
+                        //     ? import('./client-mod')
+                        //     : require.resolveWeak('./client-mod')
                         // }, { ssr: false }))`
 
                         self.added_nextjs_pure_import = true;
-
-                        // create function call of `__nextjs_pure` wrapping the
-                        // `side_effect_free_loader_arg.as_arg()`
-                        // let pure_fn_call = Expr::Call(CallExpr {
-                        //     span: DUMMY_SP,
-                        //     callee: quote_ident!("__nextjs_pure").as_callee(),
-                        //     args: vec![Expr::Paren(ParenExpr {
-                        //         span: DUMMY_SP,
-                        //         expr: Box::new(Expr::Paren(ParenExpr {
-                        //             span: DUMMY_SP,
-                        //             expr: Box::new(expr.args[0].expr.as_expr().clone()),
-                        //         })),
-                        //     })
-                        //     .into()],
-                        //     type_args: Default::default(),
-                        // });
 
                         let require_resolve_weak_expr = Expr::Call(CallExpr {
                             span: DUMMY_SP,
@@ -428,18 +413,13 @@ impl Fold for NextDynamicPatcher {
                             params: vec![],
                             body: Box::new(BlockStmtOrExpr::BlockStmt(BlockStmt {
                                 span: DUMMY_SP,
-                                stmts: vec![
-                                    Stmt::Expr(ExprStmt {
-                                        span: DUMMY_SP,
-                                        expr: Box::new(wrap_expr_with_client_only_cond(
-                                            &expr.args[0].expr.as_expr(),
-                                            &require_resolve_weak_expr,
-                                        )),
-                                    }),
-                                    // pure_fn_call,
-                                    // loader is still inside the module but not executed,
-                                    // then it will be removed by tree-shaking.
-                                ],
+                                stmts: vec![Stmt::Expr(ExprStmt {
+                                    span: DUMMY_SP,
+                                    expr: Box::new(wrap_expr_with_client_only_cond(
+                                        expr.args[0].expr.as_expr(),
+                                        &require_resolve_weak_expr,
+                                    )),
+                                })],
                             })),
                             is_async: true,
                             is_generator: false,
@@ -447,7 +427,14 @@ impl Fold for NextDynamicPatcher {
                             return_type: None,
                         });
 
-                        expr.args[0] = side_effect_free_loader_arg.as_arg();
+                        // Only use `require.resolveWebpack` to decouple modules for webpack,
+                        // turbopack doesn't need this
+                        match self.state {
+                            NextDynamicPatcherState::Webpack => {
+                                expr.args[0] = side_effect_free_loader_arg.as_arg();
+                            }
+                            _ => {}
+                        }
                     }
 
                     let second_arg = ExprOrSpread {
@@ -644,34 +631,6 @@ impl NextDynamicPatcher {
 // to make the expression is tree-shakable on server side but
 // still remain in module graph.
 fn wrap_expr_with_client_only_cond(left: &Expr, right: &Expr) -> Expr {
-    // let browser_str_literal = Expr::Lit(Lit::Str(Str {
-    //     span: DUMMY_SP,
-    //     value: "browser".into(),
-    //     raw: None,
-    // }));
-
-    // let process_next_runtime_expr = Expr::Member(MemberExpr {
-    //     span: DUMMY_SP,
-    //     obj: (Box::new(Expr::Member(MemberExpr {
-    //         span: DUMMY_SP,
-    //         obj: (Box::new(Expr::Ident(Ident {
-    //             span: DUMMY_SP,
-    //             sym: "process".into(),
-    //             optional: false,
-    //         }))),
-    //         prop: MemberProp::Ident(Ident {
-    //             span: DUMMY_SP,
-    //             sym: "env".into(),
-    //             optional: false,
-    //         }),
-    //     }))),
-    //     prop: MemberProp::Ident(Ident {
-    //         span: DUMMY_SP,
-    //         sym: "NEXT_RUNTIME".into(),
-    //         optional: false,
-    //     }),
-    // });
-
     let undefined_str_literal = Expr::Lit(Lit::Str(Str {
         span: DUMMY_SP,
         value: "undefined".into(),
@@ -688,25 +647,8 @@ fn wrap_expr_with_client_only_cond(left: &Expr, right: &Expr) -> Expr {
         })),
     });
 
-    // Create process.env.NEXT_RUNTIME === 'browser'
-    // let browser_only_expr = Expr::Bin(BinExpr {
-    //     span: DUMMY_SP,
-    //     left: Box::new(process_next_runtime_expr),
-    //     op: BinaryOp::EqEqEq, // '==='
-    //     right: Box::new(browser_str_literal),
-    // });
-
-    // create expression <browser only condition> && <expression>
-    // Expr::Bin(BinExpr {
-    //     span: DUMMY_SP,
-    //     op: op!("&&"),
-    //     left: Box::new(browser_only_expr),
-    //     right: Box::new(wrapped_expr.clone()),
-    // });
-
     // transform import('...') which is named as `wrapped_expr` to
     // typeof window !== 'undefined' ? import('...') : require.resolveWeak('...')
-
     Expr::Cond(CondExpr {
         span: DUMMY_SP,
         test: Box::new(Expr::Bin(BinExpr {
@@ -716,17 +658,7 @@ fn wrap_expr_with_client_only_cond(left: &Expr, right: &Expr) -> Expr {
             right: Box::new(undefined_str_literal),
         })),
         cons: Box::new(left.clone()),
-        alt: Box::new(
-            right.clone(), /* Expr::Call(CallExpr {
-                            *     span: DUMMY_SP,
-                            *     callee: quote_ident!("require.resolveWeak").as_callee(),
-                            *     args: vec![ExprOrSpread {
-                            *         spread: None,
-                            *         expr: Box::new(left.clone()),
-                            *     }],
-                            *     type_args: Default::default(),
-                            * }) */
-        ),
+        alt: Box::new(right.clone()),
     })
 }
 
