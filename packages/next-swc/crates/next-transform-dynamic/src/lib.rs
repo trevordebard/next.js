@@ -12,7 +12,7 @@ use swc_core::{
             Callee, Expr, ExprOrSpread, ExprStmt, Id, Ident, ImportDecl, ImportDefaultSpecifier,
             ImportNamedSpecifier, ImportSpecifier, KeyValueProp, Lit, MemberExpr, MemberProp,
             Module, ModuleDecl, ModuleItem, ObjectLit, ParenExpr, Prop, PropName, PropOrSpread,
-            Stmt, Str, Tpl, UnaryExpr, UnaryOp,
+            Stmt, Str, Tpl,
         },
         utils::{prepend_stmt, private_ident, quote_ident, ExprExt, ExprFactory},
         visit::{Fold, FoldWith},
@@ -391,8 +391,8 @@ impl Fold for NextDynamicPatcher {
                         //   /**
                         //    * this will make sure we can traverse the module first but will be
                         //    * tree-shake out in server bundle */
-                        //   __nextjs_pure((() => import('./client-mod')))
-                        // ), { ssr: false })
+                        //   <browser only condition> && __nextjs_pure((() =>
+                        // import('./client-mod'))) ), { ssr: false })
 
                         self.added_nextjs_pure_import = true;
 
@@ -628,38 +628,15 @@ impl NextDynamicPatcher {
     }
 }
 
-// Receive an expression and return `typeof window !== 'undefined' &&
+// Receive an expression and return `process.env.NEXT_RUNTIME === 'browser' &&
 // <expression>`, to make the expression is tree-shakable on server side but
 // still remain in module graph.
 fn wrap_expr_with_client_only_cond(wrapped_expr: &Expr) -> Expr {
-    let typeof_expr = Expr::Unary(UnaryExpr {
+    let browser_str_literal = Expr::Lit(Lit::Str(Str {
         span: DUMMY_SP,
-        op: UnaryOp::TypeOf, // 'typeof' operator
-        arg: Box::new(Expr::Ident(Ident {
-            span: DUMMY_SP,
-            sym: "window".into(),
-            optional: false,
-        })),
-    });
-    let undefined_literal = Expr::Lit(Lit::Str(Str {
-        span: DUMMY_SP,
-        value: "edge".into(),
+        value: "browser".into(),
         raw: None,
     }));
-    // let browser_only_expr = Expr::Bin(BinExpr {
-    //     span: DUMMY_SP,
-    //     left: Box::new(typeof_expr),
-    //     op: BinaryOp::NotEqEq, // '!=='
-    //     right: Box::new(undefined_literal),
-    // });
-
-    // Create the LogicalExpr 'typeof window !== "undefined" && <expression>'
-    // Expr::Bin(BinExpr {
-    //     span: DUMMY_SP,
-    //     op: op!("&&"), // '&&' operator
-    //     left: Box::new(browser_only_expr),
-    //     right: Box::new(wrapped_expr.clone()),
-    // });
 
     let process_next_runtime_expr = Expr::Member(MemberExpr {
         span: DUMMY_SP,
@@ -683,14 +660,15 @@ fn wrap_expr_with_client_only_cond(wrapped_expr: &Expr) -> Expr {
         }),
     });
 
+    // Create process.env.NEXT_RUNTIME === 'browser'
     let browser_only_expr = Expr::Bin(BinExpr {
         span: DUMMY_SP,
         left: Box::new(process_next_runtime_expr),
-        op: BinaryOp::NotEqEq, // '!=='
-        right: Box::new(undefined_literal),
+        op: BinaryOp::EqEqEq, // '==='
+        right: Box::new(browser_str_literal),
     });
 
-    // create expression process.env.NEXT_RUNTIME === 'browser' && <expression>
+    // create expression <browser only condition> && <expression>
     Expr::Bin(BinExpr {
         span: DUMMY_SP,
         op: op!("&&"),

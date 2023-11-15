@@ -1,7 +1,7 @@
 import { __nextjs_pure } from 'next/dist/build/swc/helpers';
 import dynamic from 'next/dynamic';
 const DynamicComponent = dynamic(async ()=>{
-    process.env.NEXT_RUNTIME !== "edge" && __nextjs_pure(()=>handleImport(import('./components/hello')));
+    process.env.NEXT_RUNTIME === "browser" && __nextjs_pure(()=>handleImport(import('./components/hello')));
 }, {
     loadableGenerated: {
         modules: [

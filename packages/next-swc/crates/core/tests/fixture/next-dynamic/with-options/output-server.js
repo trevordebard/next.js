@@ -9,7 +9,7 @@ const DynamicComponentWithCustomLoading = dynamic(()=>import('../components/hell
     loading: ()=><p>...</p>
 });
 const DynamicClientOnlyComponent = dynamic(async ()=>{
-    process.env.NEXT_RUNTIME !== "edge" && __nextjs_pure(()=>import('../components/hello'));
+    process.env.NEXT_RUNTIME === "browser" && __nextjs_pure(()=>import('../components/hello'));
 }, {
     loadableGenerated: {
         modules: [
@@ -19,7 +19,7 @@ const DynamicClientOnlyComponent = dynamic(async ()=>{
     ssr: false
 });
 const DynamicClientOnlyComponentWithSuspense = dynamic(async ()=>{
-    process.env.NEXT_RUNTIME !== "edge" && __nextjs_pure(()=>import('../components/hello'));
+    process.env.NEXT_RUNTIME === "browser" && __nextjs_pure(()=>import('../components/hello'));
 }, {
     loadableGenerated: {
         modules: [
