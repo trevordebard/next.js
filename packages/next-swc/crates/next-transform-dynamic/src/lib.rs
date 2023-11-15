@@ -381,7 +381,13 @@ impl Fold for NextDynamicPatcher {
                         }
                     }
 
-                    if has_ssr_false && self.is_server_compiler && !self.is_react_server_layer {
+                    if has_ssr_false
+                        && self.is_server_compiler
+                        && !self.is_react_server_layer
+                        // Only use `require.resolveWebpack` to decouple modules for webpack,
+                        // turbopack doesn't need this
+                        && self.state == NextDynamicPatcherState::Webpack
+                    {
                         // if it's server components SSR layer
                         // Transform 1st argument `expr.args[0]` aka the module loader from:
                         // dynamic(() => import('./client-mod'), { ssr: false }))`
@@ -427,14 +433,7 @@ impl Fold for NextDynamicPatcher {
                             return_type: None,
                         });
 
-                        // Only use `require.resolveWebpack` to decouple modules for webpack,
-                        // turbopack doesn't need this
-                        match self.state {
-                            NextDynamicPatcherState::Webpack => {
-                                expr.args[0] = side_effect_free_loader_arg.as_arg();
-                            }
-                            _ => {}
-                        }
+                        expr.args[0] = side_effect_free_loader_arg.as_arg();
                     }
 
                     let second_arg = ExprOrSpread {
